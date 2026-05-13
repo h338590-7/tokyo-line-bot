@@ -1,7 +1,7 @@
 {
   "name": "tokyo-line-bot",
   "version": "1.0.0",
-  "description": "My Travel LINE Bot",
+  "description": "My Tokyo Travel Assistant",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
