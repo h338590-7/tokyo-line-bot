@@ -23,7 +23,32 @@ try {
 } catch (error) {
   console.error("Google 憑證載入失敗", error);
 }
-// ------------------------------
+
+// --- 時間計算輔助函數 ---
+function addMinutes(timeStr, minsToAdd) {
+  let [h, m] = timeStr.split(':').map(Number);
+  let date = new Date();
+  date.setHours(h, m, 0, 0);
+  date.setMinutes(date.getMinutes() + Math.round(minsToAdd));
+  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+}
+
+// --- 向 Google Maps 查詢大眾運輸車程 ---
+async function getTransitTime(origin, dest) {
+  try {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}&mode=transit&key=${apiKey}`;
+    const res = await axios.get(url);
+    if (res.data.routes && res.data.routes.length > 0) {
+      const leg = res.data.routes[0].legs[0];
+      return Math.ceil(leg.duration.value / 60); // 將秒數轉換為分鐘
+    }
+    return 30; // 如果找不到路線，預設給 30 分鐘緩衝
+  } catch (error) {
+    console.error("Google Maps API 呼叫失敗", error);
+    return 30; 
+  }
+}
 
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
@@ -42,51 +67,58 @@ async function handleEvent(event) {
   const userText = event.message.text.trim();
   let replyText = '';
 
-  // --- 核心功能：動態讀取試算表行程 ---
-  // 支援輸入 day1, Day 1, DAY1 等各種格式
-  const formattedInput = userText.toUpperCase().replace(/\s+/g, ''); 
-  
-  if (formattedInput.startsWith('DAY')) {
+  // --- 🌟 終極自動排程功能：抓取表單並計算時間 ---
+  if (userText.toUpperCase().startsWith('DAY')) {
     try {
-      // 抓取第2列到第50列的資料 (標題列不要抓)
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.SPREADSHEET_ID,
-        range: 'A2:D50', 
+        range: 'A2:E50', // 從第二列開始抓，避開標題
       });
-      const rows = response.data.values;
       
-      if (!rows || rows.length === 0) {
-        replyText = `目前試算表裡面還沒有建立行程喔！趕快去新增吧！`;
-      } else {
-        // 篩選出符合使用者輸入天數 (例如 DAY1) 的行程
-        const daySchedule = rows.filter(row => row[0] && row[0].toUpperCase().replace(/\s+/g, '') === formattedInput);
-        
-        if (daySchedule.length === 0) {
-           replyText = `找不到 ${formattedInput} 的行程，請確認你的試算表 A 欄有沒有填寫這一天喔！`;
-        } else {
-           replyText = `【📅 TOKYO SYNC - ${formattedInput} 行程】\n\n`;
-           daySchedule.forEach(row => {
-             const time = row[1] || '時間未定';
-             const place = row[2] || '';
-             const note = row[3] || '';
-             
-             if (place) {
-               // 自動生成該景點的 Google Maps 大眾運輸導航連結
-               const googleMapUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(place)}&travelmode=transit`;
-               replyText += `📍 ${time}｜${place}\n`;
-               if (note) replyText += `💡 ${note}\n`;
-               replyText += `👉 導航：${googleMapUrl}\n\n`;
-             }
-           });
-           replyText += `(行程可隨時在 Google 試算表即時更新)`;
+      const allRows = response.data.values || [];
+      // 篩選出符合使用者輸入天數 (例如 Day1) 的行程
+      const dayRows = allRows.filter(r => r[0] && r[0].toUpperCase() === userText.toUpperCase());
+
+      if (dayRows.length > 0) {
+        replyText = `【📅 TOKYO SYNC - ${userText.toUpperCase()} 自動排程】\n\n`;
+        let currentTime = dayRows[0][1]; // 取得當天第一站的起始時間 (如 09:00)
+
+        for (let i = 0; i < dayRows.length; i++) {
+          const place = dayRows[i][2];
+          const stayHours = parseFloat(dayRows[i][3]) || 1; // 預設停留 1 小時
+          const note = dayRows[i][4] || '';
+
+          replyText += `📍 ${currentTime}｜${place}\n`;
+          if (note) replyText += `💡 ${note}\n`;
+
+          // 計算離開時間
+          currentTime = addMinutes(currentTime, stayHours * 60); 
+
+          // 如果還有下一站，就計算交通時間並產生導航連結
+          if (i < dayRows.length - 1) {
+            const nextPlace = dayRows[i + 1][2];
+            const transitMins = await getTransitTime(place, nextPlace); // 呼叫 AI 算車程
+            const mapUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nextPlace)}&travelmode=transit`;
+
+            replyText += `   👇 (停留至 ${currentTime})\n`;
+            replyText += `🚇 搭乘地鐵/大眾運輸約 ${transitMins} 分鐘\n`;
+            replyText += `👉 導航：${mapUrl}\n\n`;
+
+            // 將交通時間加上去，得到下一站的抵達時間
+            currentTime = addMinutes(currentTime, transitMins);
+          } else {
+            replyText += `   👇 (預計 ${currentTime} 結束本站行程)\n`;
+          }
         }
+      } else {
+        replyText = `目前資料庫裡還沒有 ${userText} 的行程喔！請先到 Google 試算表新增資料。`;
       }
     } catch (err) {
-      replyText = `讀取行程失敗，請檢查連線狀態：${err.message}`;
+      replyText = `⚠️ 讀取行程失敗：${err.message}`;
     }
   }
-  
-  // --- 其他功能保留 ---
+
+  // --- 保留原有功能 ---
   else if (userText === '匯率') {
     try {
       const res = await axios.get('https://api.exchangerate-api.com/v4/latest/JPY');
@@ -94,33 +126,9 @@ async function handleEvent(event) {
       replyText = `【即時匯率】\n1 日圓 ≒ ${rate} 台幣\n換算：10,000日圓約為 ${Math.round(10000 * rate)} 台幣。`;
     } catch (e) { replyText = '無法取得匯率，請稍後再試。'; }
   }
-
-  else if (userText === '迪士尼') {
-    const hours = new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' });
-    const tokyoHour = new Date(hours).getHours();
-
-    if (tokyoHour >= 21 || tokyoHour < 8) {
-      replyText = '【🏰 東京迪士尼】\n目前樂園已休園 🌙\n表定營業時間為 09:00 - 21:00（日本時間）。';
-    } else {
-      try {
-        const res = await axios.get('https://api.themeparks.wiki/v1/entity/7ead8e6d-ca51-4905-905b-cb3053099491/live');
-        const rides = res.data.liveData.filter(r => ['Enchanted Tale of Beauty and the Beast', 'Space Mountain'].includes(r.name));
-        replyText = '【🏰 東京迪士尼即時排隊】\n';
-        rides.forEach(r => {
-          let statusText = r.status === 'OPERATING' && r.queue?.STANDBY ? `${r.queue.STANDBY.waitTime} 分鐘` : '無數據/維修中';
-          let nameCN = r.name.includes('Beast') ? '美女與野獸' : '太空山';
-          replyText += `📍${nameCN}：${statusText}\n`;
-        });
-      } catch (e) { replyText = '資料載入中，請稍後再試。'; }
-    }
-  }
-
-  else if (userText === '東京交通' || userText === '地鐵') {
-    replyText = `【🚉 東京鐵道即時情報】\n1. Yahoo! 乘換案內：\nhttps://transit.yahoo.co.jp/diainfo/area/4\n2. 東京地鐵官方：\nhttps://www.tokyometro.jp/unten/index.html`;
-  }
-
+  
   else {
-    replyText = `超七秘助理為您服務！\n\n您可以輸入：\n▶ 「Day1」或「Day 2」：讀取每日行程與導航\n▶ 「匯率」：看即時日幣匯率\n▶ 「迪士尼」：看樂園排隊時間\n▶ 「東京交通」：看地鐵運行狀況`;
+    replyText = `超七秘助理為您服務！\n\n▶ 輸入「Day1」：自動產生含交通時間的專屬行程表！\n▶ 輸入「匯率」：看即時日幣匯率`;
   }
 
   return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
