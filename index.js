@@ -87,7 +87,7 @@ async function handleEvent(event) {
     const destination = userText.replace('去', '').trim();
     if (destination) {
       const googleMapUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=transit`;
-      replyText = `【🗺️ 路線規劃：前往 ${destination}】\n\n已為您規劃最佳地鐵/鐵路路線，請點擊下方連結查看即時導航與票價：\n${googleMapUrl}`;
+      replyText = `【🗺️ 專屬導航：前往 ${destination}】\n\n已為您生成導航路線！點擊下方連結，Google 會自動定位您的「當下位置」開始導航：\n${googleMapUrl}\n\n💡 乘車與付款提示：\n1. 點開連結即可查看「精準車資」與「建議車廂」。\n2. 東京市區地鐵皆可直接刷 Apple Pay (需綁定數位 Suica/Pasmo) 或實體西瓜卡進站。`;
     }
   }
 
