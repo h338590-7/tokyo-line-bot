@@ -1,7 +1,7 @@
 const line = require('@line/bot-sdk');
 const express = require('express');
+const axios = require('axios');
 
-// 設定 LINE 的金鑰，會從雲端主機的安全環境變數中讀取
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
@@ -10,10 +10,8 @@ const config = {
 const client = new line.Client(config);
 const app = express();
 
-// 這是接收 LINE 訊息的「收發室」
 app.post('/webhook', line.middleware(config), (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
+  Promise.all(req.body.events.map(handleEvent))
     .then((result) => res.json(result))
     .catch((err) => {
       console.error(err);
@@ -21,34 +19,69 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     });
 });
 
-// 這裡是機器人的「大腦判斷邏輯」
-function handleEvent(event) {
-  // 如果使用者傳的不是文字，就不理他
+async function handleEvent(event) {
   if (event.type !== 'message' || event.message.type !== 'text') {
     return Promise.resolve(null);
   }
 
-  const userText = event.message.text;
+  const userText = event.message.text.trim();
   let replyText = '';
 
-  // 關鍵字判斷區 (你可以隨意修改這裡的文字)
-  if (userText === '/匯率') {
-    replyText = '目前的日圓匯率大約是 0.213 喔！(此為測試資料)';
-  } else if (userText === '/迪士尼') {
-    replyText = '【東京迪士尼即時動態】\n🏰 美女與野獸：120 分鐘\n🚀 太空山：45 分鐘\n(未來可串接爬蟲抓真實資料)';
-  } else {
-    replyText = `你剛剛說了：「${userText}」\n試著輸入 /匯率 或 /迪士尼 看看我的反應！`;
+  // --- 功能 1：真實匯率抓取 ---
+  if (userText === '匯率') {
+    try {
+      const res = await axios.get('https://api.exchangerate-api.com/v4/latest/JPY');
+      const rate = res.data.rates.TWD;
+      replyText = `【即時匯率】\n1 日圓 ≒ ${rate} 台幣\n換算：10,000日圓約為 ${Math.round(10000 * rate)} 台幣。`;
+    } catch (e) { replyText = '無法取得匯率，請稍後再試。'; }
   }
 
-  // 將組合好的文字傳送回 LINE
-  return client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: replyText
-  });
+  // --- 功能 2：真實迪士尼排隊時間 (以東京迪士尼樂園為例) ---
+  else if (userText === '迪士尼') {
+    try {
+      // 串接開源 ThemeParks Wiki API (Tokyo Disneyland)
+      const res = await axios.get('https://api.themeparks.wiki/v1/entity/7ead8e6d-ca51-4905-905b-cb3053099491/live');
+      const rides = res.data.liveData;
+      
+      // 篩選出幾個熱門設施
+      const highlights = rides.filter(r => 
+        ['Enchanted Tale of Beauty and the Beast', 'Space Mountain', 'Pooh\'s Hunny Hunt'].includes(r.name)
+      );
+
+      let disneyInfo = '【🏰 東京迪士尼即時排隊】\n';
+      highlights.forEach(r => {
+        const status = r.status === 'OPERATING' ? `${r.queue.STANDBY.waitTime} 分鐘` : '暫停營運';
+        const nameCN = r.name.replace('Enchanted Tale of Beauty and the Beast', '美女與野獸')
+                              .replace('Space Mountain', '太空山')
+                              .replace('Pooh\'s Hunny Hunt', '小熊維尼獵蜜記');
+        disneyInfo += `📍${nameCN}：${status}\n`;
+      });
+      replyText = disneyInfo + '\n(資料來源：ThemeParks Wiki)';
+    } catch (e) { 
+      replyText = '【東京迪士尼】\n目前官方資料載入中，請稍後再試。'; 
+    }
+  }
+
+  // --- 功能 3：路線規劃與東京即時交通 ---
+  else if (userText.startsWith('去')) {
+    const destination = userText.replace('去', '').trim();
+    if (destination) {
+      const googleMapUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=transit`;
+      replyText = `【🗺️ 路線規劃：前往 ${destination}】\n\n已為您規劃最佳地鐵/鐵路路線，請點擊下方連結查看即時導航與票價：\n${googleMapUrl}`;
+    }
+  }
+
+  else if (userText === '東京交通' || userText === '地鐵') {
+    replyText = `【🚉 東京鐵道即時情報】\n\n1. Yahoo! 乘換案內 (即時延誤情報)：\nhttps://transit.yahoo.co.jp/diainfo/area/4\n\n2. 東京地鐵官方運行狀況：\nhttps://www.tokyometro.jp/unten/index.html\n\n💡 提示：輸入「去 [目的地]」我可以直接幫您規劃路線喔！`;
+  }
+
+  // --- 預設回覆 ---
+  else {
+    replyText = `超七秘助理為您服務！\n\n您可以輸入：\n▶ 「匯率」：看即時日幣匯率\n▶ 「迪士尼」：看樂園排隊時間\n▶ 「東京交通」：看地鐵運行狀況\n▶ 「去 淺草寺」：自動規劃導航路線`;
+  }
+
+  return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
 }
 
-// 啟動伺服器
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`LINE Bot is running on port ${port}`);
-});
+app.listen(port, () => console.log(`Bot is running on ${port}`));
