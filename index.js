@@ -95,8 +95,30 @@ async function handleEvent(event) {
     replyText = `【🚉 東京鐵道即時情報】\n\n1. Yahoo! 乘換案內 (即時延誤情報)：\nhttps://transit.yahoo.co.jp/diainfo/area/4\n\n2. 東京地鐵官方運行狀況：\nhttps://www.tokyometro.jp/unten/index.html\n\n💡 提示：輸入「去 [目的地]」我可以直接幫您規劃路線喔！`;
   }
 
+  // --- 功能 4：多點行程排程與連動導航 (新增整合) ---
+  else if (userText.toUpperCase() === 'DAY1' || userText === '第一天') {
+    replyText = `【📅 TOKYO SYNC - Day 1 行程】
+✨ 舞濱與銀座巡禮
+
+📍 09:00｜東京迪士尼海洋
+🏃‍♂️ 提示：先抽 Standby Pass！
+👉 點擊導航：https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent('東京迪士尼海洋')}&travelmode=transit
+
+📍 18:30｜晚餐：銀座 篝 (米其林拉麵)
+🍜 提示：預估排隊 40 分鐘。
+👉 點擊導航：https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent('銀座 篝 本店')}&travelmode=transit
+
+📍 20:30｜銀座蔦屋書店 (GINZA SIX)
+📚 提示：營業至 22:30。
+👉 點擊導航：https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent('銀座蔦屋書店')}&travelmode=transit
+
+💡 查看圖文完整版：
+[請在這裡貼上你專屬網頁連結]`;
+  }
+
+  // --- 更新：預設防呆回覆 ---
   else {
-    replyText = `超七秘助理為您服務！\n\n您可以輸入：\n▶ 「匯率」：看即時日幣匯率\n▶ 「迪士尼」：看樂園排隊時間\n▶ 「東京交通」：看地鐵運行狀況\n▶ 「去 淺草寺」：自動規劃導航路線`;
+    replyText = `超七秘助理為您服務！\n\n您可以輸入：\n▶ 「Day1」：看第一天行程與導航\n▶ 「匯率」：看即時日幣匯率\n▶ 「迪士尼」：看樂園排隊時間\n▶ 「東京交通」：看地鐵運行狀況\n▶ 「去 淺草寺」：自動規劃導航路線`;
   }
 
   return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
