@@ -27,7 +27,6 @@ async function handleEvent(event) {
   const userText = event.message.text.trim();
   let replyText = '';
 
-  // --- 功能 1：真實匯率抓取 ---
   if (userText === '匯率') {
     try {
       const res = await axios.get('https://api.exchangerate-api.com/v4/latest/JPY');
@@ -36,33 +35,54 @@ async function handleEvent(event) {
     } catch (e) { replyText = '無法取得匯率，請稍後再試。'; }
   }
 
-  // --- 功能 2：真實迪士尼排隊時間 (以東京迪士尼樂園為例) ---
+  // --- 進化版：具備時間感知與精準狀態判斷的迪士尼模組 ---
   else if (userText === '迪士尼') {
-    try {
-      // 串接開源 ThemeParks Wiki API (Tokyo Disneyland)
-      const res = await axios.get('https://api.themeparks.wiki/v1/entity/7ead8e6d-ca51-4905-905b-cb3053099491/live');
-      const rides = res.data.liveData;
-      
-      // 篩選出幾個熱門設施
-      const highlights = rides.filter(r => 
-        ['Enchanted Tale of Beauty and the Beast', 'Space Mountain', 'Pooh\'s Hunny Hunt'].includes(r.name)
-      );
+    // 1. 取得目前日本東京的當地時間
+    const tokyoTimeStr = new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' });
+    const tokyoDate = new Date(tokyoTimeStr);
+    const hours = tokyoDate.getHours();
 
-      let disneyInfo = '【🏰 東京迪士尼即時排隊】\n';
-      highlights.forEach(r => {
-        const status = r.status === 'OPERATING' ? `${r.queue.STANDBY.waitTime} 分鐘` : '暫停營運';
-        const nameCN = r.name.replace('Enchanted Tale of Beauty and the Beast', '美女與野獸')
-                              .replace('Space Mountain', '太空山')
-                              .replace('Pooh\'s Hunny Hunt', '小熊維尼獵蜜記');
-        disneyInfo += `📍${nameCN}：${status}\n`;
-      });
-      replyText = disneyInfo + '\n(資料來源：ThemeParks Wiki)';
-    } catch (e) { 
-      replyText = '【東京迪士尼】\n目前官方資料載入中，請稍後再試。'; 
+    // 2. 判斷是否為休園時間 (設定為晚上 21:00 到 早上 08:00)
+    if (hours >= 21 || hours < 8) {
+      replyText = '【🏰 東京迪士尼】\n目前樂園已休園 🌙\n\n表定營業時間通常為 09:00 - 21:00（日本時間）。\n設施排隊資訊請於明天開園後再來查詢喔！';
+    } else {
+      // 3. 營業時間內，正常抓取 API
+      try {
+        const res = await axios.get('https://api.themeparks.wiki/v1/entity/7ead8e6d-ca51-4905-905b-cb3053099491/live');
+        const rides = res.data.liveData;
+        
+        const highlights = rides.filter(r => 
+          ['Enchanted Tale of Beauty and the Beast', 'Space Mountain', 'Pooh\'s Hunny Hunt'].includes(r.name)
+        );
+
+        let disneyInfo = '【🏰 東京迪士尼即時排隊】\n';
+        highlights.forEach(r => {
+          let statusText = '';
+          
+          // 4. 精準判斷設施的各種真實狀態
+          if (r.status === 'OPERATING') {
+            statusText = (r.queue && r.queue.STANDBY) ? `${r.queue.STANDBY.waitTime} 分鐘` : '目前無數據';
+          } else if (r.status === 'CLOSED') {
+            statusText = '🔴 本日已關閉';
+          } else if (r.status === 'DOWN') {
+            statusText = '⚠️ 維修/暫停營運中';
+          } else {
+            statusText = '狀態未知';
+          }
+
+          const nameCN = r.name.replace('Enchanted Tale of Beauty and the Beast', '美女與野獸')
+                                .replace('Space Mountain', '太空山')
+                                .replace('Pooh\'s Hunny Hunt', '小熊維尼獵蜜記');
+          disneyInfo += `📍${nameCN}：${statusText}\n`;
+        });
+        replyText = disneyInfo + '\n(資料來源：ThemeParks Wiki)';
+      } catch (e) { 
+        // 只有在 API 真的當機時才會出現這個訊息
+        replyText = '【🏰 東京迪士尼】\n目前無法連線到第三方伺服器抓取即時數據，這可能是伺服器維護中，請稍後再試喔！'; 
+      }
     }
   }
 
-  // --- 功能 3：路線規劃與東京即時交通 ---
   else if (userText.startsWith('去')) {
     const destination = userText.replace('去', '').trim();
     if (destination) {
@@ -75,7 +95,6 @@ async function handleEvent(event) {
     replyText = `【🚉 東京鐵道即時情報】\n\n1. Yahoo! 乘換案內 (即時延誤情報)：\nhttps://transit.yahoo.co.jp/diainfo/area/4\n\n2. 東京地鐵官方運行狀況：\nhttps://www.tokyometro.jp/unten/index.html\n\n💡 提示：輸入「去 [目的地]」我可以直接幫您規劃路線喔！`;
   }
 
-  // --- 預設回覆 ---
   else {
     replyText = `超七秘助理為您服務！\n\n您可以輸入：\n▶ 「匯率」：看即時日幣匯率\n▶ 「迪士尼」：看樂園排隊時間\n▶ 「東京交通」：看地鐵運行狀況\n▶ 「去 淺草寺」：自動規劃導航路線`;
   }
