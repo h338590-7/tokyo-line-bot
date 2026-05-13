@@ -1,0 +1,13 @@
+{
+  "name": "tokyo-line-bot",
+  "version": "1.0.0",
+  "description": "My Travel LINE Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^8.0.1",
+    "express": "^4.18.2"
+  }
+}
