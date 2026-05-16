@@ -134,22 +134,42 @@ async function handleEvent(event) {
     } catch (e) { return Promise.resolve(null); }
   }
 
-  // 3. 迪士尼功能
-  else if (userText === '迪士尼') {
+  // 3. 迪士尼功能 (🌟 已修正為防呆模糊搜尋)
+  else if (userText.includes('迪士尼')) {
     const hours = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' })).getHours();
     if (hours >= 21 || hours < 8) {
       replyText = '【🏰 東京迪士尼】\n目前休園中 🌙\n營業時間：09:00 - 21:00';
     } else {
       try {
         const res = await axios.get('https://api.themeparks.wiki/v1/entity/7ead8e6d-ca51-4905-905b-cb3053099491/live');
-        const list = res.data.liveData.filter(r => ['Enchanted Tale of Beauty and the Beast', 'Space Mountain', 'Pooh\'s Hunny Hunt'].includes(r.name));
-        replyText = '【🏰 迪士尼即時排隊】\n' + list.map(r => `📍${r.name.replace('Enchanted Tale of Beauty and the Beast', '美女與野獸').replace('Space Mountain', '太空山').replace('Pooh\'s Hunny Hunt', '小熊維尼')}：${r.queue?.STANDBY?.waitTime || 0} 分鐘`).join('\n');
+        
+        // 改用 includes 模糊比對，避免 API 設施名稱稍微變動就抓不到資料
+        const list = res.data.liveData.filter(r => 
+          r.name.includes('Beauty and the Beast') || 
+          r.name.includes('Space Mountain') || 
+          r.name.includes('Pooh')
+        );
+        
+        if (list.length > 0) {
+          replyText = '【🏰 迪士尼即時排隊】\n' + list.map(r => {
+            let nameCN = r.name;
+            if (nameCN.includes('Beauty')) nameCN = '美女與野獸';
+            if (nameCN.includes('Space')) nameCN = '太空山';
+            if (nameCN.includes('Pooh')) nameCN = '小熊維尼';
+            
+            // 判斷是否營運中，如果維修中會顯示暫停營運
+            let waitTime = r.status === 'OPERATING' ? `${r.queue?.STANDBY?.waitTime || 0} 分鐘` : '暫停營運/關閉';
+            return `📍${nameCN}：${waitTime}`;
+          }).join('\n');
+        } else {
+          replyText = '【🏰 東京迪士尼】\n目前無法取得指定設施的排隊數據。';
+        }
       } catch (e) { replyText = '迪士尼 API 暫時離線。'; }
     }
   }
 
-  // 其他指令
-  else if (userText === '匯率') {
+  // 其他指令 (🌟 已修正為模糊搜尋)
+  else if (userText.includes('匯率') || userText.includes('日幣')) {
     try {
       const res = await axios.get('https://api.exchangerate-api.com/v4/latest/JPY');
       replyText = `【即時匯率】\n目前 1 日圓 ≒ ${res.data.rates.TWD} 台幣\n💡 直接輸入數字即可自動換算！`;
